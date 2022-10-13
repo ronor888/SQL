@@ -63,3 +63,9 @@ select title, author
  order by title;
    
 ----------------------------------------------------
+
+Придумайте один или несколько запросов к нашей таблице book. Проверьте, правильно ли они работают.
+
+select author
+from book
+full group by author
