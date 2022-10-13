@@ -68,4 +68,12 @@ select title, author
 
 select author
 from book
-full group by author
+group by author
+
+----------------------------------------------------------------
+Отобрать различные (уникальные) элементы столбца amount таблицы book.
+
+select distinct amount
+from book;
+
+--------------------------------------
