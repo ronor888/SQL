@@ -2205,19 +2205,187 @@ group by ttt.group_rate
 order by ttt.group_rate;
 ------------------------------------------------------------------------------------------------------         
 		3.5.6
+Задание
+Исправить запрос примера так: для шагов, которые  не имеют неверных ответов,  указать 100 как процент успешных попыток, если же шаг не имеет верных ответов, указать 0. Информацию отсортировать сначала по возрастанию успешности, а затем по названию шага в алфавитном порядке.
+
+with get_count_correct (st_n_c, count_correct)
+  as (
+      select s.step_name, count(*)
+      from step s 
+          inner join step_student ss using(step_id)
+      where result = 'correct'
+      group by s.step_name
+     ),
+    get_count_wrong (st_n_w, count_wrong)
+  as (
+      select s.step_name, count(*)
+      from step s
+          inner join step_student ss using(step_id)
+      where result = 'wrong'
+      group by s.step_name
+     )
+select st_n_c as Шаг, if(round(count_correct / (count_correct + count_wrong) * 100) is null, 100,              round(count_correct / (count_correct + count_wrong) * 100)) as Успешность
+  from get_count_correct
+       left join get_count_wrong on st_n_c = st_n_w
+ union
+select st_n_w as Шаг,
+       if(round(count_correct / (count_correct + count_wrong) * 100) is null, 0, round(count_correct           / (count_correct + count_wrong) * 100)) as Успешность
+  from get_count_correct
+       right join get_count_wrong on st_n_c = st_n_w
+ order by 2, 1;
+
+/*или (НЕ МОЕ РЕШЕНИЕ)
+SELECT step_name AS Шаг,
+       ROUND(AVG(IF(result = 'correct', 1, 0)) * 100) AS Успешность
+  FROM step
+       inner join step_student USING(step_id)
+ GROUP BY step_id
+ ORDER BY Успешность, Шаг; */
+------------------------------------------------------------------------------------------------------          		3.5.7
+Задание
+Вычислить прогресс пользователей по курсу. Прогресс вычисляется как отношение верно пройденных шагов к общему количеству шагов в процентах, округленное до целого. В нашей базе данные о решениях занесены не для всех шагов, поэтому общее количество шагов определить как количество различных шагов в таблице step_student.
+Тем пользователям, которые прошли все шаги (прогресс = 100%) выдать "Сертификат с отличием". Тем, у кого прогресс больше или равен 80% - "Сертификат". Для остальных записей в столбце Результат задать пустую строку ("").
+Информацию отсортировать по убыванию прогресса, затем по имени пользователя в алфавитном порядке.     
+
+select s.student_name as Студент,
+       round(100 * count(tt.student_id) / (select count(distinct step_id) from step_student)) as              Прогресс,
+       case
+           when round(100 * count(tt.student_id) / (select count(distinct step_id) from step_student)) = 100 then 'Сертификат с отличием'
+           when round(100 * count(tt.student_id) / (select count(distinct step_id) from step_student))  >= 80 then 'Сертификат'
+           else ''
+       end as Результат       
+from 
+(
+select distinct step_id, student_id, count(distinct step_id)
+from step_student
+where result = 'correct'
+group by step_id, student_id
+order by 1, 2
+) tt inner join student s using(student_id)
+group by student_id
+order by 2 desc, 1;
+------------------------------------------------------------------------------------------------------          
+		3.5.8
+
+/*
+Синтаксис оконных функций, оператор OVER, ORDERE BY
+название_функции(выражение)
+    OVER (
+          partition by столбец_1, столбец_2, ... - это окно
+          ORDER BY  ... - сортировка
+          rows between - границы окна
+          ...
+    ) # причем все разделы over являются не обязательными, но обязательно нужно указать либо окно, либо сортировку.
+
+На данном шаге рассмотрим самый простой синтаксис оконного выражения:
+
+название_функции(выражение)
+    over (
+          order by...
+    )
+Пример
+Вычислить, сколько шагов прошел пользователь. Ранжировать пользователей по убыванию результатов.*/
+select student_name, count(distinct step_id) as Количество,
+       row_number() over(order by count(distinct step_id) desc) as Номер
+from student inner join step_student using(student_id)
+where result = 'correct'
+group by student_name;
+
+/*В этом запросе после того, как были выбраны все студенты, посчитаны их шаги с правильными ответами, с помощью оконной функции была выполнена сортировка по количеству верных шагов (count(DISTINCT step_id))  и пронумерованы строки (функция ROW_NUMBER()).
+Дополнительно ранжируем студентов.*/
+select student_name, count(distinct step_id) as Количество,
+    row_number() over (order by count(distinct step_id) desc) as Номер,
+    rank() over (order by count(distinct step_id) desc) as Ранг,
+    dense_rank() over (order by count(distinct step_id) desc) as Рейтинг
+from step_student 
+    inner join student using(student_id)
+where result = 'correct'
+group by student_name;
+/*С помощью функции RANK() и DENSE_RANK() все студенты, имеющие 30  верно пройденных шагов, получили ранг 2 и  рейтинг 2. Студентам с 29 балами присвоен ранг 16 и  рейтинг 3.
+
+Пример
+Для каждого студента указать, на сколько меньше он прошел шагов, чем идущий перед ним по рейтингу студент
+*/
+select student_name, count(distinct step_id) as Количество,
+    lag(count(distinct step_id))
+    over (order by count(distinct step_id) desc) - count(distinct step_id) as Разница
+from student inner join step_student using(student_id)
+where result = 'correct'
+group by student_name;
+
+/*Так как у первой записи нет предыдущей - значение разницы null. Заменим ее на 0 с помощью функции:
+ifnull(выражение, результат)
+которая возвращает результат, если выражение равно null, и само выражение в противном случае*/
+select student_name, count(distinct step_id) as Количество,
+    ifnull(lag(count(distinct step_id))
+          over (order by count(distinct step_id) desc) - count(distinct step_id),
+          0) as Разница
+from student inner join step_student using(student_id)
+where result = 'correct'
+group by student_name;
 
 
+Задание
+Для студента с именем student_61 вывести все его попытки: название шага, результат и дату отправки попытки (submission_time). Информацию отсортировать по дате отправки попытки и указать, сколько минут прошло между отправкой соседних попыток. Название шага ограничить 20 символами и добавить "...". Столбцы назвать Студент, Шаг, Результат, Дата_отправки, Разница.
+Пояснение
+ 1. Время в таблице step_student представлено в формате  Unix-время , в котором хранится количество секунд, прошедших с 1 января 1970 года. Для перевода к привычному виду DATE используется формула:
+1970-01-01 + time_unix / 86400
+В SQL для перевода удобно использовать функцию  FROM_UNIXTIME( ).
+Например:
+FROM_UNIXTIME(1598291490) =  2020-08-24 17:51:30
+2. Для перевода количества секунд во временной формат используется функция SEC_TO_TIME(),например:
+SEC_TO_TIME(288) = 0:04:48
 
-------------------------------------------------------------------------------------------------------               
+select s.student_name as Студент,
+       concat(left(step.step_name, 20),'...') as Шаг, # Вывожу только первые 20 символов с названия шага, а после приклеиваю многоточие
+       ss.result as Результат,
+       from_unixtime(ss.submission_time) as Дата_отправки, # перевод к привычному формату видe date (использутеся формула 1970-01-01 + time_unix / 86400, в SQL для перевода удобно использовать функцию from_unixtime())
+       sec_to_time(submission_time - ifnull((lag(submission_time) over(order by submission_time)), submission_time)) as Разница
+  from step_student ss
+       inner join step using(step_id)
+       inner join student s using(student_id)
+ where student_name = 'student_61'
+ order by 4, 5;
 
+либо можно вот так: сразу прописать в lag()
+select s.student_name as Студент,
+       concat(left(step.step_name, 20),'...') as Шаг, # Вывожу только первые 20 символов с названия шага, а после приклеиваю многоточие
+       ss.result as Результат,
+       from_unixtime(ss.submission_time) as Дата_отправки, # перевод к привычному формату видe date (использутеся формула 1970-01-01 + time_unix / 86400, в SQL для перевода удобно использовать функцию from_unixtime())
+       sec_to_time(submission_time - (lag(submission_time, 1, submission_time) over(order by submission_time))) as Разница
+  from step_student ss
+       inner join step using(step_id)
+       inner join student s using(student_id)
+ where student_name = 'student_61'
+ order by 4, 5;
+------------------------------------------------------------------------------------------------------          
+		3.5.9
+Задание
+Посчитать среднее время, за которое пользователи проходят урок по следующему алгоритму:
+    для каждого пользователя вычислить время прохождения шага как сумму времени, потраченного на каждую попытку (время попытки - это разница между временем отправки задания и временем начала попытки), при этом попытки, которые длились больше 4 часов не учитывать, так как пользователь мог просто оставить задание открытым в браузере, а вернуться к нему на следующий день;
+    для каждого студента посчитать общее время, которое он затратил на каждый урок;
+    вычислить среднее время выполнения урока в часах, результат округлить до 2-х знаков после запятой;
+    вывести информацию по возрастанию времени, пронумеровав строки, для каждого урока указать номер модуля и его позицию в нем.
+Столбцы результата назвать Номер, Урок, Среднее_время.
 
-------------------------------------------------------------------------------------------------------               
+select row_number() over(order by round(avg(t.sum_dt) / 3600, 2)) as Номер,
+       concat(l.module_id, '.', l.lesson_position, ' ', t.lesson_name) as Урок,
+       
+       round(avg(t.sum_dt) / 3600, 2) as Среднее_время
+from (
+select l.lesson_name, ss.student_id, sum(ss.submission_time - ss.attempt_time) as sum_dt
+from step_student ss
+    inner join step s using(step_id)
+    inner join lesson l using(lesson_id)
+where (ss.submission_time - ss.attempt_time) <= (3600 * 4) and l.lesson_name in
+(select lesson_name 
+  from lesson
+  where lesson_name in ('Запросы на выборку, соединение таблиц', 'Выборка данных', 'База данных "Интернет-магазин книг", запросы на выборку'))
+group by ss.student_id, l.lesson_name
 
-
-------------------------------------------------------------------------------------------------------               
-
-
-
+) t
+    inner join lesson l on t.lesson_name = l.lesson_name
+group by t.lesson_name, l.module_id, l.lesson_position;
 ------------------------------------------------------------------------------------------------------               
 
 
